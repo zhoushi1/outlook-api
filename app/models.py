@@ -25,6 +25,7 @@ class EmailItem(BaseModel):
     to: str = ""
     date: str
     body: str
+    body_html: str = ""
     has_attachments: bool = False
     folder: str = ""
 

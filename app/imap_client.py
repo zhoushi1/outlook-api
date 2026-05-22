@@ -27,14 +27,24 @@ def _decode_mime_header(value) -> str:
     return "".join(parts)
 
 
-def _extract_body(msg) -> Tuple[str, bool]:
-    """返回 (正文文本, 是否含附件)"""
-    body = ""
+def _html_to_text(raw: str) -> str:
+    raw = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", raw,
+                 flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    return (raw.replace("&nbsp;", " ")
+               .replace("&lt;", "<")
+               .replace("&gt;", ">")
+               .replace("&amp;", "&")
+               .replace("&quot;", '"'))
+
+
+def _extract_body(msg) -> Tuple[str, str, bool]:
+    """返回 (纯文本正文, 原始HTML正文, 是否含附件)"""
+    plain = ""
+    html_raw = ""
     has_attachments = False
 
     if msg.is_multipart():
-        plain = ""
-        html = ""
         for part in msg.walk():
             ctype = part.get_content_type()
             disp = str(part.get("Content-Disposition") or "")
@@ -49,32 +59,27 @@ def _extract_body(msg) -> Tuple[str, bool]:
                     plain = part.get_payload(decode=True).decode(charset, errors="replace")
                 except Exception:
                     pass
-            elif ctype == "text/html" and not html:
+            elif ctype == "text/html" and not html_raw:
                 try:
                     charset = part.get_content_charset() or "utf-8"
-                    raw = part.get_payload(decode=True).decode(charset, errors="replace")
-                    raw = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", raw,
-                                 flags=re.DOTALL | re.IGNORECASE)
-                    raw = re.sub(r"<[^>]+>", "", raw)
-                    raw = (raw.replace("&nbsp;", " ")
-                              .replace("&lt;", "<")
-                              .replace("&gt;", ">")
-                              .replace("&amp;", "&")
-                              .replace("&quot;", '"'))
-                    html = raw
+                    html_raw = part.get_payload(decode=True).decode(charset, errors="replace")
                 except Exception:
                     pass
-        body = plain or html
     else:
         try:
             charset = msg.get_content_charset() or "utf-8"
             payload = msg.get_payload(decode=True)
             if payload is not None:
-                body = payload.decode(charset, errors="replace")
+                decoded = payload.decode(charset, errors="replace")
+                if msg.get_content_type() == "text/html":
+                    html_raw = decoded
+                else:
+                    plain = decoded
         except Exception:
-            body = str(msg.get_payload())
+            plain = str(msg.get_payload())
 
-    return body.strip(), has_attachments
+    text = plain or (_html_to_text(html_raw) if html_raw else "")
+    return text.strip(), html_raw.strip(), has_attachments
 
 
 ALL_FOLDERS = ("INBOX", "Junk")
@@ -110,10 +115,12 @@ def _fetch_one_folder(imap, folder: str, count: int, body_limit: int) -> Tuple[i
         from_addr = _decode_mime_header(msg.get("From")) or ""
         to_addr = _decode_mime_header(msg.get("To")) or ""
         date = msg.get("Date") or ""
-        body, has_attachments = _extract_body(msg)
+        body, body_html, has_attachments = _extract_body(msg)
 
         if body_limit and len(body) > body_limit:
             body = body[:body_limit] + "..."
+        if body_limit and len(body_html) > body_limit * 4:
+            body_html = body_html[:body_limit * 4] + "..."
 
         results.append({
             "subject": subject,
@@ -121,6 +128,7 @@ def _fetch_one_folder(imap, folder: str, count: int, body_limit: int) -> Tuple[i
             "to": to_addr,
             "date": date,
             "body": body,
+            "body_html": body_html,
             "has_attachments": has_attachments,
             "folder": folder,
         })

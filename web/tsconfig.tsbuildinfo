@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/accountlist.tsx","./src/components/addaccountdialog.tsx","./src/components/mailview.tsx","./src/lib/api.ts","./src/lib/code.ts","./src/lib/storage.ts","./src/types/index.ts"],"version":"5.9.3"}
